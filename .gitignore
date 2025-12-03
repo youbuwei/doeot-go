@@ -1,0 +1,62 @@
+# ─────────────────────────────
+# Go 构建产物
+# ─────────────────────────────
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# go build 输出（如果你用 -o 或脚本写到当前目录）
+*.log
+*.tmp
+
+# 覆盖率 / 性能分析
+*.prof
+*.pprof
+*.cov
+coverage.out
+cpu.prof
+mem.prof
+
+# ─────────────────────────────
+# Go Modules / Vendor
+# ─────────────────────────────
+vendor/
+
+# ─────────────────────────────
+# 编辑器 / IDE
+# ─────────────────────────────
+
+# GoLand / IntelliJ IDEA
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+.history/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ─────────────────────────────
+# 操作系统 & 杂项
+# ─────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─────────────────────────────
+# 项目特定
+# ─────────────────────────────
+
+.env.local
+.env.*
+.env
+
+internal/**/interfaces/http/zz_*_gen.go
+internal/**/interfaces/rpc/zz_*_gen.go
