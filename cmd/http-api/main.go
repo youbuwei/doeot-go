@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	app := boot.New("user-api")
+	app := boot.New("http-api")
 
 	// Wire the user module with shared DB from app.
 	userModule := user.NewModule(app.DB())

@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	app := boot.New("user-rpc")
+	app := boot.New("json-rpc")
 
 	// Wire the user module with shared DB from app.
 	userModule := user.NewModule(app.DB())

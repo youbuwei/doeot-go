@@ -53,8 +53,8 @@
 │   ├── dev            # dev 工具（可直接 go run 使用）
 │   ├── bizgen         # 注解 -> HTTP/RPC 代码生成
 │   ├── modgen         # 模块脚手架生成
-│   ├── user-api       # 示例 HTTP 服务
-│   └── user-rpc       # 示例 RPC 服务
+│   ├── http-api       # 示例 HTTP 服务
+│   └── json-rpc       # 示例 RPC 服务
 ├── internal
 │   ├── user
 │   │   ├── domain     # 领域模型 & 仓储接口
@@ -73,7 +73,7 @@
 │   ├── errs          # 错误码体系
 │   └── validate      # 请求校验封装
 └── go.mod
-
+```
 ---
 
 ## 🚀 快速开始
@@ -92,14 +92,14 @@ go mod tidy
 推荐使用统一入口 `doeot`：
 
 ```bash
-# 同时跑 user-api + user-rpc，并开启 Dev HTTP 面板 :18080
-go run ./cmd/doeot dev -services user-api,user-rpc -dev-http :18080
+# 同时跑 http-api + json-rpc，并开启 Dev HTTP 面板 :18080
+go run ./cmd/doeot dev -services http-api,json-rpc -dev-http :18080
 ```
 
 启动后可以看到：
 
 ```text
-dev: running services: user-api, user-rpc
+dev: running services: http-api, json-rpc
 dev: HTTP panel: http://localhost:18080/
 dev: commands: [r] restart (go generate + restart), [s] status, [q] quit
 dev>
@@ -148,7 +148,7 @@ import (
 )
 
 func main() {
-    app := boot.New("user-api")
+    app := boot.New("http-api")
 
     app.RegisterModule(user.NewModule(app.DB()))
     app.RegisterModule(order.NewModule(app.DB()))
@@ -254,7 +254,7 @@ func RegisterRoutes(r biz.Router, ep *endpoint.OrderEndpoint) {
 go run ./cmd/doeot -h
 
 # 开发模式（dev）
-go run ./cmd/doeot dev -services user-api,user-rpc -dev-http :18080
+go run ./cmd/doeot dev -services http-api,json-rpc -dev-http :18080
 
 # 模块生成（modgen）
 go run ./cmd/doeot modgen -name order
