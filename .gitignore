@@ -58,5 +58,4 @@ Thumbs.db
 .env.*
 .env
 
-internal/**/interfaces/http/zz_*_gen.go
-internal/**/interfaces/rpc/zz_*_gen.go
+**/zz_*_gen.go

@@ -59,6 +59,7 @@ func scanEndpoints(moduleName string) (*scanResult, error) {
 
 			if fn.Doc != nil {
 				for _, c := range fn.Doc.List {
+					// c.Text 形如 "// @Route  GET /users/:id"
 					text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
 					switch {
 					case strings.HasPrefix(text, "@Route"):
@@ -86,6 +87,7 @@ func scanEndpoints(moduleName string) (*scanResult, error) {
 				}
 			}
 
+			// 只保存至少有一个注解的函数。
 			if info.RouteMethod != "" || info.RPCMethod != "" {
 				eps = append(eps, info)
 			}

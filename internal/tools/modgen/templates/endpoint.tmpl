@@ -1,0 +1,72 @@
+package endpoint
+
+//go:generate go run {{ .ModPath }}/cmd/bizgen -module {{ .ModuleName }}
+
+import (
+	"errors"
+
+	"{{ .ModPath }}/internal/{{ .ModuleName }}/app"
+	"{{ .ModPath }}/internal/{{ .ModuleName }}/domain"
+	"{{ .ModPath }}/pkg/biz"
+	"{{ .ModPath }}/pkg/errs"
+)
+
+type Get{{ .TypeName }}Req struct {
+	ID int64
+}
+
+type Get{{ .TypeName }}Resp struct {
+	ID   int64
+	Name string
+}
+
+type Create{{ .TypeName }}Req struct {
+	Name string
+}
+
+type Create{{ .TypeName }}Resp struct {
+	ID   int64
+	Name string
+}
+
+// {{ .TypeName }}Endpoint 将应用服务暴露为 HTTP/RPC 端点。
+type {{ .TypeName }}Endpoint struct {
+	Svc *app.{{ .TypeName }}Service
+}
+
+// @Route  GET /{{ .ModuleName }}s/:id
+// @RPC    {{ .TypeName }}.Get
+// @Auth   login
+// @Desc   获取 {{ .ModuleName }}
+// @Tags   {{ .ModuleName }}
+func (e *{{ .TypeName }}Endpoint) Get{{ .TypeName }}(ctx biz.Context, req *Get{{ .TypeName }}Req) (*Get{{ .TypeName }}Resp, error) {
+	m, err := e.Svc.Get(ctx.RequestContext(), req.ID)
+	if errors.Is(err, domain.Err{{ .TypeName }}NotFound) {
+		return nil, errs.NotFound("{{ .ModuleName }} not found")
+	}
+	if err != nil {
+		return nil, errs.Internal("failed to get {{ .ModuleName }}").WithCause(err)
+	}
+	return &Get{{ .TypeName }}Resp{
+		ID:   m.ID,
+		Name: m.Name,
+	}, nil
+}
+
+// @Route  POST /{{ .ModuleName }}s
+// @RPC    {{ .TypeName }}.Create
+// @Auth   login
+// @Desc   创建 {{ .ModuleName }}
+// @Tags   {{ .ModuleName }}
+func (e *{{ .TypeName }}Endpoint) Create{{ .TypeName }}(ctx biz.Context, req *Create{{ .TypeName }}Req) (*Create{{ .TypeName }}Resp, error) {
+	m, err := e.Svc.Create(ctx.RequestContext(), &domain.{{ .TypeName }}{
+		Name: req.Name,
+	})
+	if err != nil {
+		return nil, errs.Internal("failed to create {{ .ModuleName }}").WithCause(err)
+	}
+	return &Create{{ .TypeName }}Resp{
+		ID:   m.ID,
+		Name: m.Name,
+	}, nil
+}

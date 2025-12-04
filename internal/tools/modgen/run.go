@@ -1,18 +1,38 @@
 package modgen
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"text/template"
 
 	"github.com/youbuwei/doeot-go/internal/tools/bizgen"
 	"github.com/youbuwei/doeot-go/internal/tools/shared"
 )
 
-// Run 根据 Config 生成模块骨架，并调用 bizgen 生成 HTTP/RPC 包装代码。
+// Config 在 config.go 里已定义，这里直接使用。
+// type Config struct{ ModuleName string }
+
+// templateData 用于 domain/app/repo/endpoint/module 模板。
+type templateData struct {
+	ModPath    string // go.mod 里的 module 路径，例如 github.com/youbuwei/doeot-go
+	ModuleName string // 模块名，形如 "user"、"order"、"pay"
+	TypeName   string // 导出的类型名，形如 "User"、"Order"、"Pay"
+}
+
+// modulesTemplateData 用于 modules.tmpl。
+type modulesTemplateData struct {
+	ModPath string   // module 路径
+	Modules []string // 所有业务模块名，例如 ["user", "order", "pay"]
+}
+
+// Run 根据 Config 生成模块骨架，并调用 bizgen + 模块注册表生成。
 func Run(ctx context.Context, cfg Config) error {
 	name := strings.ToLower(strings.TrimSpace(cfg.ModuleName))
 	if name == "" {
@@ -29,23 +49,43 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	if err := generateDomain(root, modPath, name, typeName); err != nil {
-		return err
+	data := templateData{
+		ModPath:    modPath,
+		ModuleName: name,
+		TypeName:   typeName,
 	}
-	if err := generateApp(root, modPath, name, typeName); err != nil {
-		return err
-	}
-	if err := generateRepo(root, modPath, name, typeName); err != nil {
-		return err
-	}
-	if err := generateEndpoint(root, modPath, name, typeName); err != nil {
-		return err
-	}
-	if err := generateModule(root, modPath, name, typeName); err != nil {
+
+	// 1. 领域层（只在文件不存在时创建）
+	if err := genFromTemplate(root, domainTmpl,
+		filepath.Join("internal", name, "domain", "domain.go"), data, false); err != nil {
 		return err
 	}
 
-	// 优先使用内部库调用 bizgen（更快）；如果失败，退回 go run cmd/bizgen。
+	// 2. 应用层
+	if err := genFromTemplate(root, appTmpl,
+		filepath.Join("internal", name, "app", "service.go"), data, false); err != nil {
+		return err
+	}
+
+	// 3. 仓储实现
+	if err := genFromTemplate(root, repoTmpl,
+		filepath.Join("internal", name, "infra", "repo", "repo.go"), data, false); err != nil {
+		return err
+	}
+
+	// 4. endpoint（带注解）
+	if err := genFromTemplate(root, endpointTmpl,
+		filepath.Join("internal", name, "interfaces", "endpoint", name+"_endpoint.go"), data, false); err != nil {
+		return err
+	}
+
+	// 5. module 入口
+	if err := genFromTemplate(root, moduleTmpl,
+		filepath.Join("internal", name, "module.go"), data, false); err != nil {
+		return err
+	}
+
+	// 6. 调用 bizgen 生成 HTTP/RPC wrapper
 	if err := bizgen.Run(ctx, bizgen.Config{ModuleName: name}); err != nil {
 		fmt.Fprintf(os.Stderr, "modgen: internal bizgen failed, fallback to go run cmd/bizgen: %v\n", err)
 		cmd := exec.Command("go", "run", filepath.Join(root, "cmd", "bizgen"), "-module", name)
@@ -56,9 +96,15 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 
+	// 7. 生成模块注册表 internal/modules/zz_modules_gen.go（总是允许覆盖）
+	if err := generateModulesRegistry(root, modPath); err != nil {
+		return err
+	}
+
 	return nil
 }
 
+// 把 s_foo / foo_bar 转成 CamelCase：sFoo / FooBar。
 func toCamel(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -74,266 +120,99 @@ func toCamel(s string) string {
 	return strings.Join(parts, "")
 }
 
-func generateDomain(root, modPath, moduleName, typeName string) error {
-	path := filepath.Join(root, "internal", moduleName, "domain", "domain.go")
-	content := fmt.Sprintf(`package domain
+// 渲染模板并写入文件：
+//   - 如果文件不存在：创建，并输出 "modgen: created <path>"
+//   - 如果存在且 overwrite=false：不改，不输出
+//   - 如果存在且 overwrite=true：
+//   - 内容不变：不输出
+//   - 内容变化：覆盖，并输出 "modgen: updated <path>"
+func genFromTemplate(root string, tmpl *template.Template, relPath string, data any, overwrite bool) error {
+	full := filepath.Join(root, relPath)
 
-import "context"
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("execute template for %s: %w", relPath, err)
+	}
+	newContent := buf.Bytes()
 
-// %[2]s 是 %[1]s 模块的领域模型示例，你可以按需扩展字段。
-type %[2]s struct {
-    ID   int64
-    Name string
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", relPath, err)
+	}
+
+	_, err := os.Stat(full)
+	if errors.Is(err, os.ErrNotExist) {
+		// 首次生成
+		if err := os.WriteFile(full, newContent, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", relPath, err)
+		}
+		fmt.Printf("modgen: created %s\n", relPath)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", relPath, err)
+	}
+
+	// 文件已存在
+	if !overwrite {
+		// skeleton 文件走“只生成一次”的策略，不再改动
+		return nil
+	}
+
+	oldContent, err := os.ReadFile(full)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", relPath, err)
+	}
+	if bytes.Equal(oldContent, newContent) {
+		// 内容未变化，无需输出
+		return nil
+	}
+
+	if err := os.WriteFile(full, newContent, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", relPath, err)
+	}
+	fmt.Printf("modgen: updated %s\n", relPath)
+	return nil
 }
 
-// NotFoundError 用于标识未找到该资源。
-type NotFoundError struct {
-    msg string
-}
+// 扫描 internal/*/module.go 生成 internal/modules/zz_modules_gen.go。
+func generateModulesRegistry(root, modPath string) error {
+	pattern := filepath.Join(root, "internal", "*", "module.go")
+	paths, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		// 还没有任何模块，跳过。
+		return nil
+	}
 
-func (e *NotFoundError) Error() string { return e.msg }
+	modSet := make(map[string]struct{})
+	for _, p := range paths {
+		dir := filepath.Dir(p)
+		mod := filepath.Base(dir)
+		// 排除 internal/modules、internal/tools 等非业务目录。
+		if mod == "modules" || mod == "tools" {
+			continue
+		}
+		modSet[mod] = struct{}{}
+	}
 
-// Err%[2]sNotFound 在仓储查不到数据时返回。
-var Err%[2]sNotFound = &NotFoundError{msg: "%[1]s not found"}
+	if len(modSet) == 0 {
+		return nil
+	}
 
-// Repo 抽象了针对 %[2]s 的持久化操作。
-type Repo interface {
-    FindByID(ctx context.Context, id int64) (*%[2]s, error)
-    Create(ctx context.Context, m *%[2]s) (*%[2]s, error)
-    List(ctx context.Context) ([]*%[2]s, error)
-}
-`, moduleName, typeName)
-	return shared.WriteFileOnce(path, []byte(content))
-}
+	var mods []string
+	for m := range modSet {
+		mods = append(mods, m)
+	}
+	sort.Strings(mods)
 
-func generateApp(root, modPath, moduleName, typeName string) error {
-	path := filepath.Join(root, "internal", moduleName, "app", "service.go")
-	content := fmt.Sprintf(`package app
+	data := modulesTemplateData{
+		ModPath: modPath,
+		Modules: mods,
+	}
 
-import (
-    "context"
-
-    "%[1]s/internal/%[2]s/domain"
-)
-
-// %[3]sService 封装了围绕 %[3]s 的业务逻辑。
-type %[3]sService struct {
-    repo domain.Repo
-}
-
-func New%[3]sService(repo domain.Repo) *%[3]sService {
-    return &%[3]sService{repo: repo}
-}
-
-func (s *%[3]sService) Get(ctx context.Context, id int64) (*domain.%[3]s, error) {
-    return s.repo.FindByID(ctx, id)
-}
-
-func (s *%[3]sService) Create(ctx context.Context, m *domain.%[3]s) (*domain.%[3]s, error) {
-    return s.repo.Create(ctx, m)
-}
-
-func (s *%[3]sService) List(ctx context.Context) ([]*domain.%[3]s, error) {
-    return s.repo.List(ctx)
-}
-`, modPath, moduleName, typeName)
-	return shared.WriteFileOnce(path, []byte(content))
-}
-
-func generateRepo(root, modPath, moduleName, typeName string) error {
-	path := filepath.Join(root, "internal", moduleName, "infra", "repo", "repo.go")
-	content := fmt.Sprintf(`package repo
-
-import (
-    "context"
-    "errors"
-
-    "%[1]s/internal/%[2]s/domain"
-    "gorm.io/gorm"
-)
-
-// %[3]sModel 是 %[2]s 模块的 GORM 模型。
-type %[3]sModel struct {
-    ID   int64
-    Name string
-}
-
-func (%[3]sModel) TableName() string { return "%[2]ss" }
-
-// Repo 是基于 GORM 的 domain.Repo 实现。
-type Repo struct {
-    db *gorm.DB
-}
-
-func NewRepo(db *gorm.DB) *Repo {
-    return &Repo{db: db}
-}
-
-func (r *Repo) FindByID(ctx context.Context, id int64) (*domain.%[3]s, error) {
-    var m %[3]sModel
-    if err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            return nil, domain.Err%[3]sNotFound
-        }
-        return nil, err
-    }
-    return &domain.%[3]s{
-        ID:   m.ID,
-        Name: m.Name,
-    }, nil
-}
-
-func (r *Repo) Create(ctx context.Context, d *domain.%[3]s) (*domain.%[3]s, error) {
-    m := %[3]sModel{
-        ID:   d.ID,
-        Name: d.Name,
-    }
-    if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
-        return nil, err
-    }
-    return &domain.%[3]s{
-        ID:   m.ID,
-        Name: m.Name,
-    }, nil
-}
-
-func (r *Repo) List(ctx context.Context) ([]*domain.%[3]s, error) {
-    var rows []%[3]sModel
-    if err := r.db.WithContext(ctx).Find(&rows).Error; err != nil {
-        return nil, err
-    }
-    res := make([]*domain.%[3]s, 0, len(rows))
-    for _, m := range rows {
-        res = append(res, &domain.%[3]s{
-            ID:   m.ID,
-            Name: m.Name,
-        })
-    }
-    return res, nil
-}
-`, modPath, moduleName, typeName)
-	return shared.WriteFileOnce(path, []byte(content))
-}
-
-func generateEndpoint(root, modPath, moduleName, typeName string) error {
-	path := filepath.Join(root, "internal", moduleName, "interfaces", "endpoint", moduleName+"_endpoint.go")
-	header := fmt.Sprintf(`package endpoint
-
-//go:generate go run github.com/youbuwei/doeot-go/cmd/bizgen -module %[2]s
-
-import (
-    "errors"
-
-    "%[1]s/internal/%[2]s/app"
-    "%[1]s/internal/%[2]s/domain"
-    "%[1]s/pkg/biz"
-    "%[1]s/pkg/errs"
-)
-`, modPath, moduleName)
-
-	types := fmt.Sprintf(`
-type Get%[1]sReq struct {
-    ID int64
-}
-
-type Get%[1]sResp struct {
-    ID   int64
-    Name string
-}
-
-type Create%[1]sReq struct {
-    Name string
-}
-
-type Create%[1]sResp struct {
-    ID   int64
-    Name string
-}
-
-// %[1]sEndpoint 将应用服务暴露为 HTTP/RPC 端点。
-type %[1]sEndpoint struct {
-    Svc *app.%[1]sService
-}
-`, typeName)
-
-	methods := fmt.Sprintf(`
-// @Route  GET /%[2]ss/:id
-// @RPC    %[1]s.Get
-// @Auth   login
-// @Desc   获取 %[2]s
-// @Tags   %[2]s
-func (e *%[1]sEndpoint) Get%[1]s(ctx biz.Context, req *Get%[1]sReq) (*Get%[1]sResp, error) {
-    m, err := e.Svc.Get(ctx.RequestContext(), req.ID)
-    if errors.Is(err, domain.Err%[1]sNotFound) {
-        return nil, errs.NotFound("%[2]s not found")
-    }
-    if err != nil {
-        return nil, errs.Internal("failed to get %[2]s").WithCause(err)
-    }
-    return &Get%[1]sResp{
-        ID:   m.ID,
-        Name: m.Name,
-    }, nil
-}
-
-// @Route  POST /%[2]ss
-// @RPC    %[1]s.Create
-// @Auth   login
-// @Desc   创建 %[2]s
-// @Tags   %[2]s
-func (e *%[1]sEndpoint) Create%[1]s(ctx biz.Context, req *Create%[1]sReq) (*Create%[1]sResp, error) {
-    m, err := e.Svc.Create(ctx.RequestContext(), &domain.%[1]s{
-        Name: req.Name,
-    })
-    if err != nil {
-        return nil, errs.Internal("failed to create %[2]s").WithCause(err)
-    }
-    return &Create%[1]sResp{
-        ID:   m.ID,
-        Name: m.Name,
-    }, nil
-}
-`, typeName, moduleName)
-
-	return shared.WriteFileOnce(path, []byte(header+types+methods))
-}
-
-func generateModule(root, modPath, moduleName, typeName string) error {
-	path := filepath.Join(root, "internal", moduleName, "module.go")
-	content := fmt.Sprintf(`package %[2]s
-
-import (
-    "%[1]s/internal/%[2]s/app"
-    "%[1]s/internal/%[2]s/infra/repo"
-    "%[1]s/internal/%[2]s/interfaces/endpoint"
-    http "%[1]s/internal/%[2]s/interfaces/http"
-    rpc "%[1]s/internal/%[2]s/interfaces/rpc"
-    "%[1]s/pkg/biz"
-    "gorm.io/gorm"
-)
-
-// Module 实现 biz.Module，用于注册 %[2]s 模块的 HTTP/RPC 路由。
-type Module struct {
-    ep *endpoint.%[3]sEndpoint
-}
-
-// NewModule 组装 %[2]s 模块的依赖关系。
-func NewModule(db *gorm.DB) *Module {
-    r := repo.NewRepo(db)
-    svc := app.New%[3]sService(r)
-    ep := &endpoint.%[3]sEndpoint{Svc: svc}
-    return &Module{ep: ep}
-}
-
-func (m *Module) Name() string { return "%[2]s" }
-
-func (m *Module) RegisterHTTP(r biz.Router) {
-    http.RegisterRoutes(r, m.ep)
-}
-
-func (m *Module) RegisterRPC(r biz.RPCRouter) {
-    rpc.RegisterRPC(r, m.ep)
-}
-`, modPath, moduleName, typeName)
-	return shared.WriteFileOnce(path, []byte(content))
+	relPath := filepath.Join("internal", "modules", "zz_modules_gen.go")
+	// 注册表允许覆盖，因为模块列表会随时间变化。
+	return genFromTemplate(root, modulesTmpl, relPath, data, true)
 }

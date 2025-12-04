@@ -15,6 +15,7 @@ func Run(ctx context.Context, cfg Config) error {
 		log.Printf("bizgen: no annotated endpoints found for module %s", cfg.ModuleName)
 		return nil
 	}
+
 	if err := generateHTTP(res, cfg.ModuleName); err != nil {
 		return err
 	}
