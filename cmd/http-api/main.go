@@ -1,20 +1,24 @@
 package main
 
 import (
-	"log"
+    "log"
 
-	"github.com/youbuwei/doeot-go/internal/modules"
-	"github.com/youbuwei/doeot-go/pkg/boot"
+    "github.com/youbuwei/doeot-go/internal/app"
+    httpiface "github.com/youbuwei/doeot-go/internal/interfaces/http"
+    "github.com/youbuwei/doeot-go/pkg/config"
+    "github.com/youbuwei/doeot-go/pkg/di"
 )
 
 func main() {
-	app := boot.New("http-api")
+    container := di.Build()
 
-	for _, m := range modules.All(app.DB()) {
-		app.RegisterModule(m)
-	}
-
-	if err := app.Run(); err != nil { // 取决于你 boot 的实现
-		log.Fatal(err)
-	}
+    err := container.Invoke(func(cfg *config.Config, svc app.OrderService) {
+        r := httpiface.NewEngine(svc)
+        if err := r.Run(":" + cfg.HTTPPort); err != nil {
+            log.Fatal(err)
+        }
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
 }

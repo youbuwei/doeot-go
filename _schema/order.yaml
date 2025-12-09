@@ -1,0 +1,26 @@
+aggregate: Order
+table: orders
+soft_delete: false
+
+fields:
+  - name: id
+    type: uint
+    column: id
+    pk: true
+
+  - name: user_id
+    type: string
+    column: user_id
+
+  - name: amount
+    type: float64
+    column: amount
+
+relations: []
+
+crud:
+  create: true
+  get: false
+  list: false
+  update: false
+  delete: false
