@@ -4,8 +4,8 @@ import "os"
 
 // Config 基础配置
 type Config struct {
-	HTTP_PORT string
-	MYSQL_DSN string
+	HTTPPort string `env:"HTTP_PORT"`
+	MySQLDSN string `env:"MYSQL_DSN"`
 }
 
 func getEnv(key, def string) string {
@@ -18,8 +18,8 @@ func getEnv(key, def string) string {
 // Load 从环境变量加载配置（带默认值）
 func Load() (*Config, error) {
 	cfg := &Config{
-		HTTP_PORT: getEnv("HTTP_PORT", "8080"),
-		MYSQL_DSN: getEnv("MYSQL_DSN", "root:root@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=True&loc=Local"),
+		HTTPPort: getEnv("HTTP_PORT", "8080"),
+		MySQLDSN: getEnv("MYSQL_DSN", "root:123456@tcp(127.0.0.1:3306)/doeot?charset=utf8mb4&parseTime=True&loc=Local"),
 	}
 	return cfg, nil
 }

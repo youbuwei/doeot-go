@@ -9,7 +9,7 @@ import (
 
 // NewGormDB 初始化 GORM（MySQL），并自动迁移 Order 表
 func NewGormDB(cfg *config.Config) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(cfg.MYSQL_DSN), &gorm.Config{})
+	db, err := gorm.Open(mysql.Open(cfg.MySQLDSN), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
