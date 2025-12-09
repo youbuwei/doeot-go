@@ -1,33 +1,61 @@
-# doeot-go (重构起步版)
+# doeot-go HTTP 版本示例（无 RPC）
 
-这是一个简化后的 DDD + HTTP + JSON-RPC 示例服务，用于作为新架构的起点。
+这是一个只包含 HTTP 接口的最小可运行示例，用来先把新架构跑起来：
 
-## 启动步骤
+- DDD 分层：`internal/domain` / `internal/app` / `internal/infra` / `internal/interfaces/http`
+- handler：单接口单文件，继承 `Get/Post/Put/Delete` 约束
+- 依赖注入：`internal/di/container.go`（基于 dig）
+- 数据库：MySQL + GORM
+- 暂时 **不包含 JSON-RPC 相关代码**，后续再单独加回去
+
+## 准备 MySQL
+
+可以用 Docker 快速起一个本地 MySQL：
 
 ```bash
-# 启动 HTTP 接口服务
+docker run -d --name doeot-mysql \
+  -e MYSQL_ROOT_PASSWORD=123456 \
+  -e MYSQL_DATABASE=doeot \
+  -p 3306:3306 \
+  mysql:8.0
+```
+
+数据库默认配置：
+
+- 数据库名：`doeot`
+- 用户：`root`
+- 密码：`123456`
+
+可以使用 `schema/sql/orders.sql` 手动建表，也可以直接依赖 GORM 的 AutoMigrate（第一次运行会自动建表）。
+
+## 配置
+
+通过环境变量控制：
+
+- `HTTP_PORT`：HTTP 端口，默认 `8080`
+- `MYSQL_DSN`：MySQL DSN，默认：
+
+```text
+root:123456@tcp(127.0.0.1:3306)/doeot?charset=utf8mb4&parseTime=True&loc=Local
+```
+
+## 安装依赖
+
+在项目根目录执行：
+
+```bash
+go mod tidy
+```
+
+## 启动 HTTP 服务
+
+```bash
 go run ./cmd/http-api
-
-# 启动 JSON-RPC 服务
-go run ./cmd/json-rpc
 ```
 
-默认端口：
-- HTTP: `8080`
-- JSON-RPC: `8090`
-- SQLite 数据库文件：`data.db`（自动在当前目录创建）
+## HTTP CRUD 示例
 
-你可以通过环境变量覆盖默认配置：
-
-```bash
-export HTTP_PORT=8080
-export RPC_PORT=8090
-export DB_PATH=./data.db
-```
-
-## 测试接口
-
-### HTTP 创建订单
+### 创建订单
 
 ```bash
 curl -X POST http://localhost:8080/orders \
@@ -35,22 +63,28 @@ curl -X POST http://localhost:8080/orders \
   -d '{"user_id":"u1","amount":99.9}'
 ```
 
-返回示例：
-
-```json
-{"order_id":1}
-```
-
-### JSON-RPC 创建订单
+### 获取订单
 
 ```bash
-curl -X POST http://localhost:8090/rpc \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","method":"order.create","params":{"user_id":"u1","amount":99.9},"id":1}'
+curl http://localhost:8080/orders/1
 ```
 
-返回示例：
+### 列出订单（可选按 user_id 过滤）
 
-```json
-{"jsonrpc":"2.0","result":{"order_id":1},"id":1}
+```bash
+curl "http://localhost:8080/orders?user_id=u1"
+```
+
+### 更新订单
+
+```bash
+curl -X PUT http://localhost:8080/orders/1 \
+  -H 'Content-Type: application/json' \
+  -d '{"amount":120.5,"status":"paid"}'
+```
+
+### 删除订单
+
+```bash
+curl -X DELETE http://localhost:8080/orders/1
 ```

@@ -16,11 +16,15 @@ fields:
     type: float64
     column: amount
 
+  - name: status
+    type: string
+    column: status
+
 relations: []
 
 crud:
   create: true
-  get: false
-  list: false
-  update: false
-  delete: false
+  get: true
+  list: true
+  update: true
+  delete: true
